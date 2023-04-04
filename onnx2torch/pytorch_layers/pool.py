@@ -15,7 +15,7 @@ class Pool(nn.Module):
                 kernel_size=onnx_node.attrs["kernel_shape"],
                 stride=onnx_node.attrs["strides"],
                 padding=onnx_node.attrs["pads"][2:],
-                ceil_mode=bool(onnx_node.attrs["ceil_mode"]),
+                ceil_mode=bool(get_value_by_key(onnx_node, "ceil_mode", 0)),
             )
         elif onnx_node.op == "AveragePool":
             pool = nn.AvgPool2d(

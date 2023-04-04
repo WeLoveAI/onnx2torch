@@ -215,6 +215,15 @@ class OnnxPytorchParser:
                     onnx_node.name,
                 )
                 self.env[onnx_node.outputs[0].name] = node
+            elif onnx_node.op == "Sigmoid":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    F.sigmoid,
+                    (self.env[onnx_node.inputs[0].name],),
+                    {},
+                    onnx_node.name,
+                )
+                self.env[onnx_node.outputs[0].name] = node
             elif onnx_node.op == "ReduceMean":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_method",
