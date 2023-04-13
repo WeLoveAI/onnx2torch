@@ -1,9 +1,5 @@
 import os
 
-os.environ[
-    "GLOG_minloglevel"
-] = "3"  # 0 - debug 1 - info (still a LOT of outputs) 2 - warnings 3 - errors
-
 import pytest
 import warnings
 import torch
