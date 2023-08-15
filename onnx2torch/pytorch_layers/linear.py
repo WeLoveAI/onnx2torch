@@ -6,7 +6,10 @@ from torch.nn.parameter import Parameter
 class Linear(nn.Module):
     @classmethod
     def from_onnx(cls, mod):
-        weight = Parameter(torch.from_numpy(mod.inputs[1].values))
+        if mod.attrs['transB']:
+            weight = Parameter(torch.from_numpy(mod.inputs[1].values))
+        else:
+            weight = Parameter(torch.from_numpy(mod.inputs[1].values).transpose(1, 0))
         bias = (
             None
             if len(mod.inputs) < 3
