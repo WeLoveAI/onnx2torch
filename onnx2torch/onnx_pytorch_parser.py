@@ -6,6 +6,8 @@ from torch.fx import Graph, GraphModule
 
 import onnx
 import onnx_graphsurgeon as gs
+import onnxruntime.tools.symbolic_shape_infer as onnxrt_symbolic_shape_inference
+
 import _operator
 from .pytorch_layers import *
 
@@ -15,6 +17,8 @@ class OnnxPytorchParser:
         super(OnnxPytorchParser, self).__init__()
         self.model = model
         self.onnx_model = onnx.load(model)
+
+        self.onnx_model = onnxrt_symbolic_shape_inference.SymbolicShapeInference.infer_shapes(self.onnx_model, auto_merge=True)        
         self.graph = gs.import_onnx(self.onnx_model)
         self.graph.fold_constants().cleanup().toposort()
         self.pytorch_graph = Graph()
@@ -184,12 +188,13 @@ class OnnxPytorchParser:
                     )
                     self.env[output.name] = node
             elif onnx_node.op == "Slice":
+                inputs = Slice.from_onnx(onnx_node, self.env)
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     _operator.getitem,
                     (
                         self.env[onnx_node.inputs[0].name],
-                        (slice(1, self.env[onnx_node.inputs[2].name], 1)),
+                        inputs,
                     ),
                     {},
                     onnx_node.outputs[0].name,
@@ -206,6 +211,17 @@ class OnnxPytorchParser:
                     onnx_node.outputs[0].name,
                 )
                 self.env[onnx_node.outputs[0].name] = node
+            elif onnx_node.op == "BatchNormalization":
+                module = BatchNorm.from_onnx(onnx_node)
+                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    onnx_node.outputs[0].name,
+                    (self.env[onnx_node.inputs[0].name],),
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node                
             elif onnx_node.op == "Softmax":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
@@ -224,6 +240,33 @@ class OnnxPytorchParser:
                     onnx_node.outputs[0].name,
                 )
                 self.env[onnx_node.outputs[0].name] = node
+            elif onnx_node.op == "HardSwish":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    F.hardswish,
+                    (self.env[onnx_node.inputs[0].name],),
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node    
+            elif onnx_node.op == "LeakyRelu":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    F.hardswish,
+                    (self.env[onnx_node.inputs[0].name], onnx_node.attrs['alpha']),
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node         
+            elif onnx_node.op == "Resize":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    F.interpolate,
+                    (self.env[onnx_node.inputs[0].name],),
+                    {'scale_factor': onnx_node.inputs[2].values.tolist()[2:], 'mode': onnx_node.attrs['mode']},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node                                        
             elif onnx_node.op == "ReduceMean":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_method",
@@ -272,7 +315,7 @@ class OnnxPytorchParser:
                 )
                 self.env[dequant_node.outputs[0].name] = node
             elif onnx_node.op == "DequantizeLinear":
-                pass                            
+                pass                          
             else:
                 raise NotImplementedError(
                     "Operator {} is not supported.".format(onnx_node.op)
