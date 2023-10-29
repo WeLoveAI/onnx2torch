@@ -18,12 +18,11 @@ class Slice(nn.Module):
         steps = mod.inputs[4] if len(mod.inputs) > 4 else None
 
         slice_inputs = [slice(None, None, None)] * len(mod.inputs[0].shape)
-
         if axes is not None:
             for idx in range(len(axes.values)):
                 axes_idx = axes.values[idx]
-                steps = steps.values[idx] if steps is not None else 1
-                slice_inputs[axes_idx] = slice(start.values[idx], end.values[idx], steps)
+                steps_ = steps.values[idx] if steps is not None else 1
+                slice_inputs[axes_idx] = slice(start.values[idx], end.values[idx], steps_)
         else:
             raise NotImplementedError
 

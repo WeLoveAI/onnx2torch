@@ -30,6 +30,50 @@ class OnnxPytorchParser:
         self.gen_pytorch_graph_module()
         return self.pytorch_graph_module
 
+    def create_arg(self, a):
+        if isinstance(a, torch.nn.Parameter):
+            for n, p in self.pytorch_graph_module.named_parameters():
+                if a is p:
+                    return self.create_node("get_attr", n, (), {})
+            raise NameError("parameter is not a member of this module")
+        elif isinstance(a, torch.Tensor):
+            for n_, p_ in self.pytorch_graph_module.named_buffers():
+                if a is p_:
+                    return self.create_node("get_attr", n_, (), {})
+        elif isinstance(a, torch.nn.Module):
+            for n_, p_ in self.pytorch_graph_module.named_modules():
+                if a is p_:
+                    return self.create_node("get_attr", n_, (), {})
+        # For NamedTuple instances that appear literally as args, we emit
+        # a node to construct the NamedTuple and use that Node as the argument.
+        if isinstance(a, tuple) and hasattr(a, "_fields"):
+            args = tuple(self.create_arg(elem) for elem in a)
+            return self.create_node("call_function", a.__class__, args, {})
+
+        qualname = None
+        if isinstance(a, (torch.Tensor)):
+            if not qualname:
+                i = 0
+                while True:
+                    qualname = f"_tensor_constant{i}"
+                    if not hasattr(self.pytorch_graph_module, qualname):
+                        break
+                    i += 1
+                setattr(self.pytorch_graph_module, qualname, a)
+
+            return self.pytorch_graph.create_node("get_attr", qualname, (), {})
+
+    def process_inputs(self, inputs):
+        inputs = list(inputs)
+        for idx in range(len(inputs)):
+            input = self.create_arg(inputs[idx])
+            if input:
+                inputs[idx] = input
+
+        inputs = tuple(inputs)
+        
+        return inputs
+
     def gen_pytorch_graph_module(self):
         for input in self.graph.inputs:
             node = self.pytorch_graph.placeholder(
@@ -49,6 +93,17 @@ class OnnxPytorchParser:
                     onnx_node.outputs[0].name,
                 )
                 self.env[onnx_node.outputs[0].name] = node
+            elif onnx_node.op == "LayerNormalization":
+                module = LayerNorm.from_onnx(onnx_node)
+                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    onnx_node.outputs[0].name,
+                    (self.env[onnx_node.inputs[0].name],),
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node                
             elif onnx_node.op == "Relu":
                 node = self.pytorch_graph.create_node(
                     "call_function",
@@ -60,6 +115,7 @@ class OnnxPytorchParser:
                 self.env[onnx_node.outputs[0].name] = node
             elif onnx_node.op == "Add":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
+                inputs = self.process_inputs(inputs)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.add,
@@ -68,6 +124,16 @@ class OnnxPytorchParser:
                     onnx_node.outputs[0].name,
                 )
                 self.env[onnx_node.outputs[0].name] = node
+            elif onnx_node.op == "Sub":
+                inputs = Arithmetic.from_onnx(onnx_node, self.env)
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.sub,
+                    inputs,
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node                
             elif onnx_node.op == "Div":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 node = self.pytorch_graph.create_node(
@@ -80,6 +146,7 @@ class OnnxPytorchParser:
                 self.env[onnx_node.outputs[0].name] = node
             elif onnx_node.op == "Mul":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
+                inputs = self.process_inputs(inputs)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.mul,
@@ -88,6 +155,26 @@ class OnnxPytorchParser:
                     onnx_node.outputs[0].name,
                 )
                 self.env[onnx_node.outputs[0].name] = node
+            elif onnx_node.op == "MatMul":
+                inputs = Arithmetic.from_onnx(onnx_node, self.env)
+                inputs = self.process_inputs(inputs)
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.matmul,
+                    inputs,
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node         
+            elif onnx_node.op == "Gelu":
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    F.gelu,
+                    (self.env[onnx_node.inputs[0].name],),
+                    {},
+                    onnx_node.outputs[0].name,
+                )
+                self.env[onnx_node.outputs[0].name] = node                          
             elif onnx_node.op == "GlobalAveragePool":
                 module = Pool.from_onnx(onnx_node)
                 self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
@@ -274,7 +361,7 @@ class OnnxPytorchParser:
                     (self.env[onnx_node.inputs[0].name],),
                     {
                         "dim": onnx_node.attrs["axes"],
-                        "keepdim": bool(onnx_node.attrs["keepdims"]),
+                        "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
                     },
                     onnx_node.outputs[0].name,
                 )

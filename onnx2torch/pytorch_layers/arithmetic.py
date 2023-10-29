@@ -8,7 +8,7 @@ class Arithmetic(nn.Module):
     def from_onnx(cls, mod, env):
         def get_input_node(input, env):
             if isinstance(input, Constant):
-                return int(input.values)
+                return torch.from_numpy(input.values)
             else:
                 return env[input.name]
 
