@@ -35,7 +35,6 @@ class OnnxPytorchParser:
             for n, p in self.pytorch_graph_module.named_parameters():
                 if a is p:
                     return self.create_node("get_attr", n, (), {})
-            raise NameError("parameter is not a member of this module")
         elif isinstance(a, torch.Tensor):
             for n_, p_ in self.pytorch_graph_module.named_buffers():
                 if a is p_:
