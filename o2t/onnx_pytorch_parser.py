@@ -104,14 +104,16 @@ class OnnxPytorchParser:
                 )
                 self.env[onnx_node.outputs[0].name] = node                
             elif onnx_node.op == "Relu":
+                module = nn.ReLU()
+                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
                 node = self.pytorch_graph.create_node(
-                    "call_function",
-                    F.relu,
+                    "call_module",
+                    onnx_node.outputs[0].name,
                     (self.env[onnx_node.inputs[0].name],),
                     {},
                     onnx_node.outputs[0].name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[onnx_node.outputs[0].name] = node    
             elif onnx_node.op == "Add":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 inputs = self.process_inputs(inputs)
