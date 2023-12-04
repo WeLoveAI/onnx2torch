@@ -14,6 +14,7 @@ class Arithmetic(nn.Module):
 
         inputs = []
         for input in mod.inputs:
-            inputs.append(get_input_node(input, env))
+            for feed in input.inputs: 
+                inputs.append(get_input_node(feed, env))
 
         return tuple(inputs)

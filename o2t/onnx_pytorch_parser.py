@@ -13,9 +13,10 @@ from .pytorch_layers import *
 
 
 class OnnxPytorchParser:
-    def __init__(self, model, fuse=False, dynamic_batch=False):
+    def __init__(self, model, block_info=None):
         super(OnnxPytorchParser, self).__init__()
         self.model = model
+        self.block_info = block_info
         self.onnx_model = onnx.load(model)
 
         self.onnx_model = onnxrt_symbolic_shape_inference.SymbolicShapeInference.infer_shapes(self.onnx_model, auto_merge=True)        
@@ -73,6 +74,27 @@ class OnnxPytorchParser:
         
         return inputs
 
+    def get_node_users(self, node):
+        users = []
+        for output in node.outputs:  # output is a Variable
+            for user in output.outputs:  # user is a Node
+                users.append(user)
+        return users
+
+    def get_node_feeds(self, node):
+        feeds = []
+        for input in node.inputs:  # input is a Variable
+            for feed in input.inputs:  # user is a Node
+                feeds.append(feed)
+        return feeds
+
+    def find_block_id(self, node_name, block_info):
+        for block_id, block_data in block_info.items():
+            if node_name in block_data['nodes']:
+                return block_id
+        # Return None if the node is not found in any block
+        return None
+
     def gen_pytorch_graph_module(self):
         for input in self.graph.inputs:
             node = self.pytorch_graph.placeholder(
@@ -81,39 +103,49 @@ class OnnxPytorchParser:
             self.env[input.name] = node
 
         for onnx_node in self.graph.nodes:
+            node_name = onnx_node.name
+            block_id = self.find_block_id(node_name, self.block_info)
+            if block_id is not None:
+                target_name = f"{block_id}.{node_name}"
+            node_feeds = self.get_node_feeds(onnx_node)
+            if len(node_feeds) == 0:
+                node_feeds = self.graph.inputs[0]
+            elif len(node_feeds) == 1:
+                node_feeds = node_feeds[0]
+            
             if onnx_node.op == "Conv":
                 module = Conv.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "LayerNormalization":
                 module = LayerNorm.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node                
+                self.env[node_name] = node                
             elif onnx_node.op == "Relu":
                 module = nn.ReLU()
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node    
+                self.env[node_name] = node    
             elif onnx_node.op == "Add":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 inputs = self.process_inputs(inputs)
@@ -122,9 +154,9 @@ class OnnxPytorchParser:
                     torch.add,
                     inputs,
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Sub":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 node = self.pytorch_graph.create_node(
@@ -132,9 +164,9 @@ class OnnxPytorchParser:
                     torch.sub,
                     inputs,
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node                
+                self.env[node_name] = node                
             elif onnx_node.op == "Div":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 node = self.pytorch_graph.create_node(
@@ -142,9 +174,9 @@ class OnnxPytorchParser:
                     torch.div,
                     inputs,
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Mul":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 inputs = self.process_inputs(inputs)
@@ -153,9 +185,9 @@ class OnnxPytorchParser:
                     torch.mul,
                     inputs,
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "MatMul":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 inputs = self.process_inputs(inputs)
@@ -164,111 +196,111 @@ class OnnxPytorchParser:
                     torch.matmul,
                     inputs,
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node         
+                self.env[node_name] = node         
             elif onnx_node.op == "Gelu":
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     F.gelu,
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node                          
+                self.env[node_name] = node                          
             elif onnx_node.op == "GlobalAveragePool":
                 module = Pool.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "MaxPool":
                 module = Pool.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "AveragePool":
                 module = Pool.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Flatten":
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.flatten,
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {"start_dim": onnx_node.attrs["axis"]},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Concat":
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.cat,
                     ([self.env[input_node.name] for input_node in onnx_node.inputs],),
                     {"dim": onnx_node.attrs["axis"]},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Reshape":
                 node = self.pytorch_graph.create_node(
                     "call_method",
                     "reshape",
                     (
-                        self.env[onnx_node.inputs[0].name],
+                        self.env[node_feeds.name],
                         onnx_node.inputs[1].values.tolist(),
                     ),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Transpose":
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.permute,
                     (
-                        self.env[onnx_node.inputs[0].name],
+                        self.env[node_feeds.name],
                         onnx_node.attrs["perm"],
                     ),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Split":
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.chunk,
                     (
-                        self.env[onnx_node.inputs[0].name],
+                        self.env[node_feeds.name],
                         len(onnx_node.inputs[1].values.tolist()),
                     ),
                     {"dim": onnx_node.attrs["axis"]},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
                 for i, output in enumerate(onnx_node.outputs):
                     node = self.pytorch_graph.create_node(
                         "call_function",
                         _operator.getitem,
                         (
-                            self.env[onnx_node.outputs[0].name],
+                            self.env[node_name],
                             i,
                         ),
                         {},
@@ -281,125 +313,125 @@ class OnnxPytorchParser:
                     "call_function",
                     _operator.getitem,
                     (
-                        self.env[onnx_node.inputs[0].name],
+                        self.env[node_feeds.name],
                         inputs,
                     ),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Gemm":
                 module = Linear.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "BatchNormalization":
                 module = BatchNorm.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node                
+                self.env[node_name] = node                
             elif onnx_node.op == "Softmax":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.softmax,
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {"dim": -1},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Sigmoid":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.sigmoid,
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "HardSwish":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.hardswish,
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node    
+                self.env[node_name] = node    
             elif onnx_node.op == "LeakyRelu":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.hardswish,
-                    (self.env[onnx_node.inputs[0].name], onnx_node.attrs['alpha']),
+                    (self.env[node_feeds.name], onnx_node.attrs['alpha']),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node         
+                self.env[node_name] = node         
             elif onnx_node.op == "Resize":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.interpolate,
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {'scale_factor': onnx_node.inputs[2].values.tolist()[2:], 'mode': onnx_node.attrs['mode']},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node                                        
+                self.env[node_name] = node                                        
             elif onnx_node.op == "ReduceMean":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_method",
                     "mean",
-                    (self.env[onnx_node.inputs[0].name],),
+                    (self.env[node_feeds.name],),
                     {
                         "dim": onnx_node.attrs["axes"],
                         "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
                     },
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Shape":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     getattr,
-                    (self.env[onnx_node.inputs[0].name], "shape"),
+                    (self.env[node_feeds.name], "shape"),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "Gather":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     _operator.getitem,
                     (
-                        self.env[onnx_node.inputs[0].name],
+                        self.env[node_feeds.name],
                         int(onnx_node.inputs[1].values),
                     ),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
-                self.env[onnx_node.outputs[0].name] = node
+                self.env[node_name] = node
             elif onnx_node.op == "QuantizeLinear":
                 dequant_node = onnx_node.o(0)
                 assert(dequant_node.op == "DequantizeLinear")
 
                 module = Observer(float(onnx_node.inputs[1].values), float(onnx_node.inputs[2].values))
-                self.pytorch_graph_module.add_submodule(onnx_node.outputs[0].name, module)
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
-                    onnx_node.outputs[0].name,
-                    (self.env[onnx_node.inputs[0].name],),
+                    target_name,
+                    (self.env[node_feeds.name],),
                     {},
-                    onnx_node.outputs[0].name,
+                    node_name,
                 )
                 self.env[dequant_node.outputs[0].name] = node
             elif onnx_node.op == "DequantizeLinear":
@@ -410,7 +442,7 @@ class OnnxPytorchParser:
                 )
 
         for output in self.graph.outputs:
-            node = self.pytorch_graph.output(self.env[output.name])
+            node = self.pytorch_graph.output(self.env[output.inputs[0].name])
             self.env[output.name] = node
 
         self.pytorch_graph_module.graph.lint()
