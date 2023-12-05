@@ -89,6 +89,9 @@ class OnnxPytorchParser:
         return feeds
 
     def find_block_id(self, node_name, block_info):
+        if block_info is None:
+            return None
+
         for block_id, block_data in block_info.items():
             if node_name in block_data['nodes']:
                 return block_id
@@ -104,6 +107,7 @@ class OnnxPytorchParser:
 
         for onnx_node in self.graph.nodes:
             node_name = onnx_node.name
+            target_name = node_name
             block_id = self.find_block_id(node_name, self.block_info)
             if block_id is not None:
                 target_name = f"{block_id}.{node_name}"
@@ -145,7 +149,18 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node    
+                self.env[node_name] = node   
+            elif onnx_node.op == "Clip":
+                module = nn.ReLU6()
+                self.pytorch_graph_module.add_submodule(target_name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    target_name,
+                    (self.env[node_feeds.name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node                   
             elif onnx_node.op == "Add":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 inputs = self.process_inputs(inputs)
