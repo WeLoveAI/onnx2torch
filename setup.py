@@ -27,6 +27,7 @@ setup(
     license="MIT",
     install_requires=["loguru", "torch", "onnx"],
     packages=find_packages(exclude=("tests", "tests.*")),
+    entry_points={"console_scripts": ["o2t=o2t.cli:main"]},
     zip_safe=True,
     python_requires=">=3.6",
 )
