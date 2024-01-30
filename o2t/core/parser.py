@@ -267,7 +267,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.cat,
-                    ([self.env[input_node.name] for input_node in onnx_node.inputs],),
+                    ([self.env[feed.name] for feed in node_feeds],),
                     {"dim": onnx_node.attrs["axis"]},
                     node_name,
                 )
