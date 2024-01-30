@@ -1,14 +1,12 @@
+import _operator
 import re
+
+import onnx
+import onnx_graphsurgeon as gs
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.fx import Graph, GraphModule
-
-import onnx
-import onnx_graphsurgeon as gs
-import onnxruntime.tools.symbolic_shape_infer as onnxrt_symbolic_shape_inference
-
-import _operator
 from .pytorch_layers import *
 
 
@@ -17,9 +15,11 @@ class OnnxPytorchParser:
         super(OnnxPytorchParser, self).__init__()
         self.model = model
         self.block_info = block_info
-        self.onnx_model = onnx.load(model)
+        if isinstance(model, str):
+            self.onnx_model = onnx.load(model)
+        else:
+            self.onnx_model = model
 
-        self.onnx_model = onnxrt_symbolic_shape_inference.SymbolicShapeInference.infer_shapes(self.onnx_model, auto_merge=True)        
         self.graph = gs.import_onnx(self.onnx_model)
         self.graph.fold_constants().cleanup().toposort()
         self.pytorch_graph = Graph()
@@ -29,7 +29,6 @@ class OnnxPytorchParser:
 
     def convert(self):
         self.gen_pytorch_graph_module()
-        return self.pytorch_graph_module
 
     def create_arg(self, a):
         if isinstance(a, torch.nn.Parameter):
@@ -44,8 +43,7 @@ class OnnxPytorchParser:
             for n_, p_ in self.pytorch_graph_module.named_modules():
                 if a is p_:
                     return self.create_node("get_attr", n_, (), {})
-        # For NamedTuple instances that appear literally as args, we emit
-        # a node to construct the NamedTuple and use that Node as the argument.
+
         if isinstance(a, tuple) and hasattr(a, "_fields"):
             args = tuple(self.create_arg(elem) for elem in a)
             return self.create_node("call_function", a.__class__, args, {})
@@ -71,7 +69,7 @@ class OnnxPytorchParser:
                 inputs[idx] = input
 
         inputs = tuple(inputs)
-        
+
         return inputs
 
     def get_node_users(self, node):
@@ -93,7 +91,7 @@ class OnnxPytorchParser:
             return None
 
         for block_id, block_data in block_info.items():
-            if node_name in block_data['nodes']:
+            if node_name in block_data["nodes"]:
                 return block_id
         # Return None if the node is not found in any block
         return None
@@ -116,7 +114,7 @@ class OnnxPytorchParser:
                 node_feeds = self.graph.inputs[0]
             elif len(node_feeds) == 1:
                 node_feeds = node_feeds[0]
-            
+
             if onnx_node.op == "Conv":
                 module = Conv.from_onnx(onnx_node)
                 self.pytorch_graph_module.add_submodule(target_name, module)
@@ -138,7 +136,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node                
+                self.env[node_name] = node
             elif onnx_node.op == "Relu":
                 module = nn.ReLU()
                 self.pytorch_graph_module.add_submodule(target_name, module)
@@ -149,7 +147,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node   
+                self.env[node_name] = node
             elif onnx_node.op == "Clip":
                 module = nn.ReLU6()
                 self.pytorch_graph_module.add_submodule(target_name, module)
@@ -160,7 +158,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node                   
+                self.env[node_name] = node
             elif onnx_node.op == "Add":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 inputs = self.process_inputs(inputs)
@@ -181,7 +179,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node                
+                self.env[node_name] = node
             elif onnx_node.op == "Div":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
                 node = self.pytorch_graph.create_node(
@@ -213,7 +211,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node         
+                self.env[node_name] = node
             elif onnx_node.op == "Gelu":
                 node = self.pytorch_graph.create_node(
                     "call_function",
@@ -222,7 +220,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node                          
+                self.env[node_name] = node
             elif onnx_node.op == "GlobalAveragePool":
                 module = Pool.from_onnx(onnx_node)
                 self.pytorch_graph_module.add_submodule(target_name, module)
@@ -356,7 +354,7 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node                
+                self.env[node_name] = node
             elif onnx_node.op == "Softmax":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
@@ -383,25 +381,28 @@ class OnnxPytorchParser:
                     {},
                     node_name,
                 )
-                self.env[node_name] = node    
+                self.env[node_name] = node
             elif onnx_node.op == "LeakyRelu":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.hardswish,
-                    (self.env[node_feeds.name], onnx_node.attrs['alpha']),
+                    (self.env[node_feeds.name], onnx_node.attrs["alpha"]),
                     {},
                     node_name,
                 )
-                self.env[node_name] = node         
+                self.env[node_name] = node
             elif onnx_node.op == "Resize":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.interpolate,
                     (self.env[node_feeds.name],),
-                    {'scale_factor': onnx_node.inputs[2].values.tolist()[2:], 'mode': onnx_node.attrs['mode']},
+                    {
+                        "scale_factor": onnx_node.inputs[2].values.tolist()[2:],
+                        "mode": onnx_node.attrs["mode"],
+                    },
                     node_name,
                 )
-                self.env[node_name] = node                                        
+                self.env[node_name] = node
             elif onnx_node.op == "ReduceMean":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_method",
@@ -437,9 +438,11 @@ class OnnxPytorchParser:
                 self.env[node_name] = node
             elif onnx_node.op == "QuantizeLinear":
                 dequant_node = onnx_node.o(0)
-                assert(dequant_node.op == "DequantizeLinear")
+                assert dequant_node.op == "DequantizeLinear"
 
-                module = Observer(float(onnx_node.inputs[1].values), float(onnx_node.inputs[2].values))
+                module = Observer(
+                    float(onnx_node.inputs[1].values), float(onnx_node.inputs[2].values)
+                )
                 self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
                     "call_module",
@@ -450,7 +453,7 @@ class OnnxPytorchParser:
                 )
                 self.env[dequant_node.outputs[0].name] = node
             elif onnx_node.op == "DequantizeLinear":
-                pass                          
+                pass
             else:
                 raise NotImplementedError(
                     "Operator {} is not supported.".format(onnx_node.op)
@@ -462,3 +465,6 @@ class OnnxPytorchParser:
 
         self.pytorch_graph_module.graph.lint()
         self.pytorch_graph_module.recompile()
+
+    def save(self, output_model):
+        torch.save(self.pytorch_graph_module, output_model)

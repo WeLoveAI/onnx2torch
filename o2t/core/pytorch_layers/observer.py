@@ -12,7 +12,6 @@ class Observer(nn.Module):
 
     def calculate_qparams(self):
         return self.scale, self.zero_point
-    
-    def forward(self, x):
 
+    def forward(self, x):
         return x

@@ -22,7 +22,9 @@ class Slice(nn.Module):
             for idx in range(len(axes.values)):
                 axes_idx = axes.values[idx]
                 steps_ = steps.values[idx] if steps is not None else 1
-                slice_inputs[axes_idx] = slice(start.values[idx], end.values[idx], steps_)
+                slice_inputs[axes_idx] = slice(
+                    start.values[idx], end.values[idx], steps_
+                )
         else:
             raise NotImplementedError
 

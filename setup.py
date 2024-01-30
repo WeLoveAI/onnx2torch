@@ -25,7 +25,7 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     license="MIT",
-    install_requires=["loguru", "tabulate", "onnx"],
+    install_requires=["loguru", "torch", "onnx"],
     packages=find_packages(exclude=("tests", "tests.*")),
     zip_safe=True,
     python_requires=">=3.6",
