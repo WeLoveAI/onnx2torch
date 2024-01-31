@@ -16,7 +16,10 @@ class Arithmetic(nn.Module):
 
         inputs = []
         for input in mod.inputs:
-            for feed in input.inputs:
-                inputs.append(get_input_node(feed, env))
+            if isinstance(input, Constant):
+                inputs.append(get_input_node(input, env))
+            else:
+                for feed in input.inputs:
+                    inputs.append(get_input_node(feed, env))
 
         return tuple(inputs)

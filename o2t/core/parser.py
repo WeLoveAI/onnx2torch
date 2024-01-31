@@ -1,6 +1,8 @@
 import _operator
 import re
 
+import numpy as np
+
 import onnx
 import onnx_graphsurgeon as gs
 import torch
@@ -8,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.fx import Graph, GraphModule
 from .pytorch_layers import *
+from ..utils.utils import gen_onnxruntime_input_data, onnxruntime_inference
 
 
 class OnnxPytorchParser:
@@ -83,7 +86,12 @@ class OnnxPytorchParser:
         feeds = []
         for input in node.inputs:  # input is a Variable
             for feed in input.inputs:  # user is a Node
-                feeds.append(feed)
+                if (
+                    feed.op == "Split"
+                ):  # for split node, we need to get the output of split node
+                    feeds.append(input)
+                else:
+                    feeds.append(feed)
         return feeds
 
     def find_block_id(self, node_name, block_info):
@@ -172,6 +180,7 @@ class OnnxPytorchParser:
                 self.env[node_name] = node
             elif onnx_node.op == "Sub":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
+                inputs = self.process_inputs(inputs)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.sub,
@@ -182,6 +191,7 @@ class OnnxPytorchParser:
                 self.env[node_name] = node
             elif onnx_node.op == "Div":
                 inputs = Arithmetic.from_onnx(onnx_node, self.env)
+                inputs = self.process_inputs(inputs)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.div,
@@ -385,7 +395,7 @@ class OnnxPytorchParser:
             elif onnx_node.op == "LeakyRelu":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
-                    F.hardswish,
+                    F.leaky_relu,
                     (self.env[node_feeds.name], onnx_node.attrs["alpha"]),
                     {},
                     node_name,
@@ -400,6 +410,42 @@ class OnnxPytorchParser:
                         "scale_factor": onnx_node.inputs[2].values.tolist()[2:],
                         "mode": onnx_node.attrs["mode"],
                     },
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Pow":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.pow,
+                    (self.env[node_feeds.name], float(onnx_node.inputs[1].values)),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Sqrt":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.sqrt,
+                    (self.env[node_feeds.name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Squeeze":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.squeeze,
+                    (self.env[node_feeds.name], int(onnx_node.inputs[1].values)),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Neg":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.neg,
+                    (self.env[node_feeds.name],),
+                    {},
                     node_name,
                 )
                 self.env[node_name] = node
@@ -425,17 +471,29 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Gather":
-                node = self.pytorch_graph_module.graph.create_node(
-                    "call_function",
-                    _operator.getitem,
-                    (
-                        self.env[node_feeds.name],
-                        int(onnx_node.inputs[1].values),
-                    ),
-                    {},
-                    node_name,
-                )
-                self.env[node_name] = node
+                if isinstance(onnx_node.inputs[0], gs.Constant):
+                    module = Embedding.from_onnx(onnx_node)
+                    self.pytorch_graph_module.add_submodule(target_name, module)
+                    node = self.pytorch_graph.create_node(
+                        "call_module",
+                        target_name,
+                        (self.env[node_feeds.name],),
+                        {},
+                        node_name,
+                    )
+                    self.env[node_name] = node
+                else:
+                    node = self.pytorch_graph_module.graph.create_node(
+                        "call_function",
+                        _operator.getitem,
+                        (
+                            self.env[node_feeds.name],
+                            int(onnx_node.inputs[1].values),
+                        ),
+                        {},
+                        node_name,
+                    )
+                    self.env[node_name] = node
             elif onnx_node.op == "QuantizeLinear":
                 dequant_node = onnx_node.o(0)
                 assert dequant_node.op == "DequantizeLinear"
@@ -468,3 +526,27 @@ class OnnxPytorchParser:
 
     def save(self, output_model):
         torch.save(self.pytorch_graph_module, output_model)
+
+    def check(self):
+        input_data_dict = gen_onnxruntime_input_data(self.onnx_model)
+        onnx_output = onnxruntime_inference(self.onnx_model, input_data_dict)
+        torch_dict = {k: torch.from_numpy(v) for k, v in input_data_dict.items()}
+        with torch.no_grad():
+            self.pytorch_graph_module.eval()
+            torch_output = self.pytorch_graph_module(**torch_dict)
+
+        if isinstance(torch_output, torch.Tensor):
+            torch_output = [torch_output]
+
+        onnx_output = list(onnx_output.values())
+        assert len(torch_output) == len(onnx_output)
+
+        for idx in range(len(onnx_output)):
+            np.testing.assert_allclose(
+                torch_output[idx].detach().numpy(),
+                onnx_output[idx],
+                rtol=1e-7,
+                atol=1e-3,
+            )
+
+        print("accuracy test passed")
