@@ -6,14 +6,14 @@ import onnx
 def convert(
     model: Union[str, onnx.ModelProto],
     output_model: str = None,
-    model_check: bool = False,
+    check: bool = False,
 ):
     from o2t.core.parser import OnnxPytorchParser
 
     onnx2torch = OnnxPytorchParser(model)
     onnx2torch.convert()
 
-    if model_check:
+    if check:
         onnx2torch.check()
 
     if not output_model:
@@ -38,7 +38,7 @@ def main():
         "output_model", nargs="?", default=None, help="output onnx model"
     )
 
-    parser.add_argument("--model_check", action="store_true", help="enable model check")
+    parser.add_argument("--check", action="store_true", help="enable model check")
     parser.add_argument("-v", "--version", action="version", version=o2t.__version__)
 
     args, unknown = parser.parse_known_args()
@@ -50,7 +50,7 @@ def main():
     convert(
         args.input_model,
         args.output_model,
-        args.model_check,
+        args.check,
     )
 
     return 0
