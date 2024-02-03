@@ -3,6 +3,7 @@ from typing import Dict
 import numpy as np
 
 import onnx
+import torch
 
 
 def onnx_dtype_to_numpy(onnx_dtype: int) -> np.dtype:
@@ -30,7 +31,7 @@ def gen_onnxruntime_input_data(model: onnx.ModelProto) -> Dict[str, np.array]:
     input_data_dict = {}
     for name, shapes, dtype in input_info:
         shapes = [
-            shape if (shape != -1 and not isinstance(shape, str)) else 1
+            shape if (shape != -1 and not isinstance(shape, str)) else 931
             for shape in shapes
         ]
         shapes = shapes if shapes else [1]
@@ -48,8 +49,11 @@ def onnxruntime_inference(
 ) -> Dict[str, np.array]:
     import onnxruntime as rt
 
+    sess_options = rt.SessionOptions()
+    sess_options.graph_optimization_level = rt.GraphOptimizationLevel.ORT_DISABLE_ALL
+
     sess = rt.InferenceSession(
-        model.SerializeToString(), providers=["CPUExecutionProvider"]
+        model.SerializeToString(), sess_options, providers=["CPUExecutionProvider"]
     )
     onnx_output = sess.run(None, input_data)
 
@@ -57,3 +61,22 @@ def onnxruntime_inference(
     onnx_output = dict(zip(output_names, onnx_output))
 
     return onnx_output
+
+
+numpy_to_torch_dtype_dict = {
+    np.dtype(bool): torch.bool,
+    np.dtype(np.uint8): torch.uint8,
+    np.dtype(np.int8): torch.int8,
+    np.dtype(np.int16): torch.int16,
+    np.dtype(np.int32): torch.int32,
+    np.dtype(np.int64): torch.int64,
+    np.dtype(np.float16): torch.float16,
+    np.dtype(np.float32): torch.float32,
+    np.dtype(np.float64): torch.float64,
+    np.dtype(np.complex64): torch.complex64,
+    np.dtype(np.complex128): torch.complex128,
+}
+
+
+def numpy_dtype_to_torch(scalar_type):
+    return numpy_to_torch_dtype_dict[scalar_type]
