@@ -6,25 +6,39 @@ from onnx_graphsurgeon import Constant
 class Slice(nn.Module):
     @classmethod
     def from_onnx(cls, mod, env):
-        def get_input_node(input, env):
+        def get_input_node(input, env, idx, default_value=-1):
             if isinstance(input, Constant):
-                return int(input.values)
+                return input.values[idx]
+            elif input is None:
+                return default_value
             else:
-                return env[input.name]
+                for feed in input.inputs:  # user is a Node
+                    if (
+                        feed.op == "Split"
+                    ):  # for split node, we need to get the output of split node
+                        return env[input.name]
+                    else:
+                        return env[feed.name]
 
         start = mod.inputs[1]
         end = mod.inputs[2]
         axes = mod.inputs[3] if len(mod.inputs) > 3 else None
         steps = mod.inputs[4] if len(mod.inputs) > 4 else None
 
-        slice_inputs = [slice(None, None, None)] * len(mod.inputs[0].shape)
+        slice_inputs = (
+            [slice(None, None, None)] * (max(axes.values) + 1)
+            if axes is not None
+            else [slice(None, None, None)] * len(start.values)
+        )
         if axes is not None:
             for idx in range(len(axes.values)):
                 axes_idx = axes.values[idx]
-                steps_ = steps.values[idx] if steps is not None else 1
-                slice_inputs[axes_idx] = slice(
-                    start.values[idx], end.values[idx], steps_
-                )
+
+                start_ = get_input_node(start, env, idx)
+                end_ = get_input_node(end, env, idx)
+                steps_ = get_input_node(steps, env, idx, 1)
+
+                slice_inputs[axes_idx] = slice(start_, end_, steps_)
         else:
             raise NotImplementedError
 

@@ -6,4 +6,5 @@ from .layernorm import LayerNorm
 from .linear import Linear
 from .observer import Observer
 from .pool import Pool
+from .shape_layer import Shape
 from .slice_layer import Slice
