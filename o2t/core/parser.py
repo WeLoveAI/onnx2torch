@@ -382,8 +382,6 @@ class OnnxPytorchParser:
                     node_name,
                 )
                 self.env[node_name] = node
-                # print(node.args)
-                # raise
                 for i, output in enumerate(onnx_node.outputs):
                     node = self.pytorch_graph.create_node(
                         "call_function",
@@ -617,12 +615,19 @@ class OnnxPytorchParser:
                     )
                     self.env[node_name] = node
             elif onnx_node.op == "Shape":
-                module = Shape.from_onnx(onnx_node)
-                self.pytorch_graph_module.add_submodule(target_name, module)
+                shape_node_name = node_name + "_shape"
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    getattr,
+                    (self.env[node_feeds.name], "shape"),
+                    {},
+                    shape_node_name,
+                )
+                self.env[shape_node_name] = node
                 node = self.pytorch_graph.create_node(
-                    "call_module",
-                    target_name,
-                    (self.env[node_feeds.name],),
+                    "call_function",
+                    torch.tensor,
+                    (self.env[shape_node_name],),
                     {},
                     node_name,
                 )
@@ -655,6 +660,17 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.less_equal,
+                    inputs,
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "GreaterOrEqual":
+                inputs = Arithmetic.from_onnx(onnx_node)
+                inputs = self.process_inputs(inputs)
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.greater_equal,
                     inputs,
                     {},
                     node_name,
@@ -803,9 +819,9 @@ class OnnxPytorchParser:
 
         if len(self.graph.outputs) == 1:
             if self.graph.outputs[0].inputs[0].op == "Split":
-                graph_output = self.env[output.name]
+                graph_output = self.env[self.graph.outputs[0].name]
             else:
-                graph_output = self.env[output.inputs[0].name]
+                graph_output = self.env[self.graph.outputs[0].inputs[0].name]
 
             node = self.pytorch_graph.output(graph_output)
         else:
@@ -827,11 +843,15 @@ class OnnxPytorchParser:
     def check(self):
         input_data_dict = gen_onnxruntime_input_data(self.onnx_model)
         onnx_output_dict = onnxruntime_inference(self.onnx_model, input_data_dict)
-        torch_dict = {k: torch.from_numpy(v) for k, v in input_data_dict.items()}
+        torch_dict = {
+            self._illegal_char_regex.sub("_", k): torch.from_numpy(v)
+            for k, v in input_data_dict.items()
+        }
+
         with torch.no_grad():
             self.pytorch_graph_module.eval()
             torch_output = self.pytorch_graph_module(**torch_dict)
-        # print(self.pytorch_graph_module)
+
         if isinstance(torch_output, torch.Tensor):
             torch_output = [torch_output]
 
