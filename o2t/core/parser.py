@@ -343,9 +343,11 @@ class OnnxPytorchParser:
                         to_list_node_name,
                     )
                     self.env[to_list_node_name] = node
+                    module = Reshape.from_onnx()
+                    self.pytorch_graph_module.add_submodule(target_name, module)
                     node = self.pytorch_graph.create_node(
-                        "call_function",
-                        torch.reshape,
+                        "call_module",
+                        target_name,
                         (self.env[node_feeds[0].name], self.env[to_list_node_name]),
                         {},
                         node_name,
@@ -539,19 +541,22 @@ class OnnxPytorchParser:
                 self.env[node_name] = node
             elif onnx_node.op == "ConstantOfShape":
                 size_name = node_name + "_size"
-                node = self.pytorch_graph_module.graph.create_node(
-                    "call_function",
-                    torch.Size,
+                module = Size.from_onnx()
+                self.pytorch_graph_module.add_submodule(size_name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    size_name,
                     (self.env[node_feeds.name],),
                     {},
                     size_name,
                 )
                 self.env[size_name] = node
-                value = onnx_node.attrs.get("value")
-                node = self.pytorch_graph_module.graph.create_node(
-                    "call_function",
-                    torch.full,
-                    (self.env[size_name], int(value.values)),
+                module = Full.from_onnx(onnx_node)
+                self.pytorch_graph_module.add_submodule(target_name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    target_name,
+                    (self.env[size_name],),
                     {},
                     node_name,
                 )
@@ -624,9 +629,11 @@ class OnnxPytorchParser:
                     shape_node_name,
                 )
                 self.env[shape_node_name] = node
+                module = Tensor.from_onnx()
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
-                    "call_function",
-                    torch.tensor,
+                    "call_module",
+                    target_name,
                     (self.env[shape_node_name],),
                     {},
                     node_name,
@@ -635,9 +642,11 @@ class OnnxPytorchParser:
             elif onnx_node.op == "Range":
                 inputs = Arithmetic.from_onnx(onnx_node)
                 inputs = self.process_inputs(inputs)
+                module = Arange.from_onnx()
+                self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
-                    "call_function",
-                    torch.arange,
+                    "call_module",
+                    target_name,
                     inputs,
                     {},
                     node_name,
@@ -714,9 +723,11 @@ class OnnxPytorchParser:
                 inputs = self.process_inputs(inputs)
 
                 size_name = node_name + "_size"
-                node = self.pytorch_graph_module.graph.create_node(
-                    "call_function",
-                    torch.Size,
+                module = Size.from_onnx()
+                self.pytorch_graph_module.add_submodule(size_name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    size_name,
                     (self.env[node_feeds[1].name],),
                     {},
                     size_name,
@@ -724,14 +735,17 @@ class OnnxPytorchParser:
                 self.env[size_name] = node
 
                 ones_node_name = node_name + "_ones"
+                module = Ones.from_onnx()
+                self.pytorch_graph_module.add_submodule(ones_node_name, module)
                 node = self.pytorch_graph.create_node(
-                    "call_function",
-                    torch.ones,
+                    "call_module",
+                    ones_node_name,
                     (self.env[size_name],),
                     {},
                     ones_node_name,
                 )
                 self.env[ones_node_name] = node
+
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     _operator.mul,

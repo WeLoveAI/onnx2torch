@@ -7,3 +7,4 @@ from .linear import Linear
 from .observer import Observer
 from .pool import Pool
 from .slice_layer import Slice
+from .torch_layer import Arange, Full, Ones, Reshape, Size, Tensor
