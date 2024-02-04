@@ -369,12 +369,22 @@ class OnnxPytorchParser:
                 chunk = self.get_value_by_key_or_index(
                     onnx_node, "split", 1, len(onnx_node.outputs)
                 )
+                if len(onnx_node.inputs) > 1:
+                    if isinstance(onnx_node.inputs[1], gs.Constant):
+                        chunk = onnx_node.inputs[1].values
+                    else:
+                        chunk = self.env[node_feeds[1].name]
+                    func = torch.split
+                else:
+                    chunk = len(onnx_node.outputs)
+                    func = torch.tensor_split
+
                 if isinstance(chunk, np.ndarray):
                     chunk = chunk.tolist()
                 dim = self.get_value_by_key_or_index(onnx_node, "axis", 2, 0)
                 node = self.pytorch_graph.create_node(
                     "call_function",
-                    torch.tensor_split,
+                    func,
                     (
                         self.env[node_feeds.name],
                         chunk,
@@ -861,7 +871,6 @@ class OnnxPytorchParser:
             self._illegal_char_regex.sub("_", k): torch.from_numpy(v)
             for k, v in input_data_dict.items()
         }
-
         with torch.no_grad():
             self.pytorch_graph_module.eval()
             torch_output = self.pytorch_graph_module(**torch_dict)
