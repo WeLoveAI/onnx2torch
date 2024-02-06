@@ -31,7 +31,7 @@ def gen_onnxruntime_input_data(model: onnx.ModelProto) -> Dict[str, np.array]:
     input_data_dict = {}
     for name, shapes, dtype in input_info:
         shapes = [
-            shape if (shape != -1 and not isinstance(shape, str)) else 931
+            shape if (shape != -1 and not isinstance(shape, str)) else 16
             for shape in shapes
         ]
         shapes = shapes if shapes else [1]
