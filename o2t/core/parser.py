@@ -527,6 +527,15 @@ class OnnxPytorchParser:
                     node_name,
                 )
                 self.env[node_name] = node
+            elif onnx_node.op == "Erf":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.sqrt,
+                    (self.env[node_feeds.name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
             elif onnx_node.op == "Squeeze":
                 dim = self.get_value_by_key_or_index(onnx_node, "axes", 1, None)
                 if isinstance(dim, np.ndarray):

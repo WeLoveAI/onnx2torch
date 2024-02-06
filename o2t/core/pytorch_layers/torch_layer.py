@@ -18,7 +18,6 @@ class Tensor(BaseModule):
 
     @classmethod
     def from_onnx(cls):
-
         return cls()
 
 
@@ -32,7 +31,6 @@ class Size(BaseModule):
 
     @classmethod
     def from_onnx(cls):
-
         return cls()
 
 
