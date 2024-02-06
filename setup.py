@@ -7,9 +7,9 @@ with open("o2t/version.py", "w") as f:
     f.write(f'__version__ = "{version}"\n')
 
 setup(
-    name="onnx2torch",
+    name="o2t",
     version=version,
-    description="onnx2torch: onnx to pytorch converter",
+    description="onnx2torch: onnx to native pytorch converter",
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/inisis/onnx2torch",
