@@ -1,4 +1,4 @@
-# o2t
+# onnx2torch
 
 
 # Installation
@@ -14,5 +14,5 @@ pip install .
 
 # How to use
 ```
-o2t your_onnx_model saved_pytorch_graph_module
+onnx2torch onnx_model pytorch_graph_module
 ```
