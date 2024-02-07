@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 with open("VERSION", "r") as f:
     version = f.read().strip()
 
-with open("o2t/version.py", "w") as f:
+with open("onnx2torch/version.py", "w") as f:
     f.write(f'__version__ = "{version}"\n')
 
 setup(
@@ -27,7 +27,7 @@ setup(
     license="MIT",
     install_requires=["loguru", "torch", "onnx"],
     packages=find_packages(exclude=("tests", "tests.*")),
-    entry_points={"console_scripts": ["onnx2torch=o2t.cli:main"]},
+    entry_points={"console_scripts": ["onnx2torch=onnx2torch.cli:main"]},
     zip_safe=True,
     python_requires=">=3.6",
 )

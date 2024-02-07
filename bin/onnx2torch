@@ -8,7 +8,7 @@ G_ROOT_DIR = os.path.join(os.path.dirname(G_SCRIPT_FILE), os.pardir)
 sys.path.insert(0, G_ROOT_DIR)
 
 
-from o2t import cli
+from onnx2torch import cli
 
 if __name__ == "__main__":
     sys.exit(cli.main())
