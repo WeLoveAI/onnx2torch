@@ -530,7 +530,7 @@ class OnnxPytorchParser:
             elif onnx_node.op == "Erf":
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
-                    torch.sqrt,
+                    torch.erf,
                     (self.env[node_feeds.name],),
                     {},
                     node_name,

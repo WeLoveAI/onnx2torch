@@ -8,7 +8,7 @@ def convert(
     output_model: str = None,
     check: bool = False,
 ):
-    from o2t.core.parser import OnnxPytorchParser
+    from onnx2torch.core.parser import OnnxPytorchParser
 
     onnx2torch = OnnxPytorchParser(model)
     onnx2torch.convert()
@@ -27,10 +27,10 @@ def main():
 
     from loguru import logger
 
-    import o2t
+    import onnx2torch
 
     parser = argparse.ArgumentParser(
-        description="o2t: Onnx to Pytorch Converter",
+        description="onnx2torch: Onnx to Pytorch Converter",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("input_model", help="input onnx model")
@@ -39,7 +39,9 @@ def main():
     )
 
     parser.add_argument("--check", action="store_true", help="enable model check")
-    parser.add_argument("-v", "--version", action="version", version=o2t.__version__)
+    parser.add_argument(
+        "-v", "--version", action="version", version=onnx2torch.__version__
+    )
 
     args, unknown = parser.parse_known_args()
 

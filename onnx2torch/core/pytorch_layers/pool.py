@@ -8,8 +8,13 @@ from .utils import get_value_by_key
 class Pool(nn.Module):
     @classmethod
     def from_onnx(cls, onnx_node):
+        input_shape = onnx_node.inputs[0].shape
+        input_dim = len(input_shape) if input_shape is not None else None
         if onnx_node.op == "GlobalAveragePool":
-            pool = nn.AdaptiveAvgPool2d((1, 1))
+            if input_dim == 3:
+                pool = nn.AdaptiveAvgPool1d((1))
+            elif input_dim == 4:
+                pool = nn.AdaptiveAvgPool2d((1, 1))
         elif onnx_node.op == "MaxPool":
             pool = nn.MaxPool2d(
                 kernel_size=onnx_node.attrs["kernel_shape"],
