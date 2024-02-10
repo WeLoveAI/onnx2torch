@@ -5,7 +5,7 @@ import pytest
 import torch
 import torchvision.models as models
 
-from o2t import convert
+from onnx2torch import convert
 
 
 FUSE = True
