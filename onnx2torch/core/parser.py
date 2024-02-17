@@ -10,6 +10,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.fx import Graph, GraphModule
 from .pytorch_layers import *
+from onnxslim import slim
+
 from ..utils.utils import (
     gen_onnxruntime_input_data,
     numpy_dtype_to_torch,
@@ -27,6 +29,7 @@ class OnnxPytorchParser:
         else:
             self.onnx_model = model
 
+        self.onnx_model = slim(self.onnx_model, no_constant_folding=True)
         self.graph = gs.import_onnx(self.onnx_model)
         self.graph.fold_constants().cleanup().toposort()
         self.pytorch_graph = Graph()

@@ -25,7 +25,7 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     license="MIT",
-    install_requires=["loguru", "torch", "onnx"],
+    install_requires=["loguru", "torch", "onnx", "onnxslim"],
     packages=find_packages(exclude=("tests", "tests.*")),
     entry_points={"console_scripts": ["onnx2torch=onnx2torch.cli:main"]},
     zip_safe=True,
