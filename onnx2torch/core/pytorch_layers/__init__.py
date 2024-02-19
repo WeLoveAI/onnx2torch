@@ -1,6 +1,6 @@
 from .arithmetic import Arithmetic
 from .batchnorm import BatchNorm
-from .conv import Conv
+from .conv import Conv, ConvTranspose
 from .embedding_layer import Embedding
 from .Inspector_module import InspectorModule
 from .layernorm import LayerNorm

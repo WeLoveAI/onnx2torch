@@ -154,6 +154,17 @@ class OnnxPytorchParser:
                     node_name,
                 )
                 self.env[node_name] = node
+            elif onnx_node.op == "ConvTranspose":
+                module = ConvTranspose.from_onnx(onnx_node)
+                self.pytorch_graph_module.add_submodule(target_name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    target_name,
+                    (self.env[node_feeds.name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
             elif onnx_node.op == "LayerNormalization":
                 module = LayerNorm.from_onnx(onnx_node)
                 self.pytorch_graph_module.add_submodule(target_name, module)
@@ -247,6 +258,38 @@ class OnnxPytorchParser:
                     "call_function",
                     F.gelu,
                     (self.env[node_feeds.name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "HardSigmoid":
+                alpha = onnx_node.attrs.get("alpha", 0.2)
+                beta = onnx_node.attrs.get("beta", 0.5)
+
+                mul_node_name = node_name + "_mul"
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    _operator.mul,
+                    (self.env[node_feeds.name], alpha),
+                    {},
+                    mul_node_name,
+                )
+                self.env[mul_node_name] = node
+
+                add_node_name = node_name + "_add"
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.add,
+                    (self.env[mul_node_name], beta),
+                    {},
+                    add_node_name,
+                )
+                self.env[add_node_name] = node
+
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.clip,
+                    (self.env[add_node_name], 0.0, 1.0),
                     {},
                     node_name,
                 )
