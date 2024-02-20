@@ -8,6 +8,7 @@ import onnx_graphsurgeon as gs
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from onnx_graphsurgeon import Constant
 from torch.fx import Graph, GraphModule
 from .pytorch_layers import *
 from onnxslim import slim
@@ -92,9 +93,16 @@ class OnnxPytorchParser:
         return users
 
     def get_node_feeds(self, node):
+        # feeds are a collection of Variables and Constants
         feeds = []
-        for input in node.inputs:  # input is a Variable
-            for feed in input.inputs:  # user is a Node
+        for input in node.inputs:
+            if len(input.inputs) == 0 and not isinstance(
+                input, Constant
+            ):  # input is real input
+                feeds.append(input)
+            elif isinstance(input, Constant):
+                feeds.append(input)
+            for feed in input.inputs:
                 if (
                     feed.op == "Split"
                 ):  # for split node, we need to get the output of split node
@@ -138,10 +146,6 @@ class OnnxPytorchParser:
             if block_id is not None:
                 target_name = f"{block_id}.{node_name}"
             node_feeds = self.get_node_feeds(onnx_node)
-            if len(node_feeds) == 0:
-                node_feeds = self.graph.inputs[0]
-            elif len(node_feeds) == 1:
-                node_feeds = node_feeds[0]
 
             if onnx_node.op == "Conv":
                 module = Conv.from_onnx(onnx_node)
@@ -149,7 +153,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -182,7 +186,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -199,8 +203,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Add":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.add,
@@ -210,8 +213,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Sub":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.sub,
@@ -221,8 +223,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Div":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.div,
@@ -232,8 +233,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Mul":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.mul,
@@ -243,8 +243,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "MatMul":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.matmul,
@@ -310,7 +309,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -321,7 +320,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -332,7 +331,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -341,14 +340,13 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.flatten,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {"start_dim": onnx_node.attrs["axis"]},
                     node_name,
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Concat":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.cat,
@@ -491,7 +489,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -714,8 +712,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Range":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 module = Arange.from_onnx()
                 self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
@@ -727,8 +724,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Equal":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.eq,
@@ -738,8 +734,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "LessOrEqual":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.less_equal,
@@ -749,8 +744,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "GreaterOrEqual":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.greater_equal,
@@ -760,8 +754,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "And":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.logical_and,
@@ -771,8 +764,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Not":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.logical_not,
@@ -782,8 +774,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Where":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
+                inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.where,
@@ -793,9 +784,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Expand":
-                inputs = Arithmetic.from_onnx(onnx_node)
-                inputs = self.process_inputs(inputs)
-
+                inputs = self.process_inputs(node_feeds)
                 size_name = node_name + "_size"
                 module = Size.from_onnx()
                 self.pytorch_graph_module.add_submodule(size_name, module)
