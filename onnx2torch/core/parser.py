@@ -75,8 +75,11 @@ class OnnxPytorchParser:
     def process_inputs(self, inputs):
         inputs = list(inputs)
         for idx in range(len(inputs)):
-            input = self.create_arg(inputs[idx])
-            if input:
+            if isinstance(inputs[idx], Constant):
+                param = torch.nn.Parameter(
+                    torch.from_numpy(inputs[idx].values), requires_grad=False
+                )
+                input = self.create_arg(param)
                 inputs[idx] = input
             else:
                 inputs[idx] = self.env[inputs[idx].name]
@@ -164,7 +167,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -175,7 +178,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -197,7 +200,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -256,7 +259,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     F.gelu,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -269,7 +272,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     _operator.mul,
-                    (self.env[node_feeds.name], alpha),
+                    (self.env[node_feeds[0].name], alpha),
                     {},
                     mul_node_name,
                 )
@@ -298,7 +301,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     F.log_softmax,
-                    (self.env[node_feeds.name], axis),
+                    (self.env[node_feeds[0].name], axis),
                     {},
                     node_name,
                 )
@@ -361,7 +364,7 @@ class OnnxPytorchParser:
                         "call_method",
                         "reshape",
                         (
-                            self.env[node_feeds.name],
+                            self.env[node_feeds[0].name],
                             onnx_node.inputs[1].values.tolist(),
                         ),
                         {},
@@ -411,7 +414,7 @@ class OnnxPytorchParser:
                     "call_function",
                     torch.permute,
                     (
-                        self.env[node_feeds.name],
+                        self.env[node_feeds[0].name],
                         onnx_node.attrs["perm"],
                     ),
                     {},
@@ -439,7 +442,7 @@ class OnnxPytorchParser:
                     "call_function",
                     func,
                     (
-                        self.env[node_feeds.name],
+                        self.env[node_feeds[0].name],
                         chunk,
                         dim,
                     ),
@@ -461,16 +464,9 @@ class OnnxPytorchParser:
                     self.env[output.name] = node
             elif onnx_node.op == "Slice":
                 if isinstance(onnx_node.inputs[0], gs.Constant):
-                    node_feeds = torch.nn.Parameter(
-                        torch.from_numpy(onnx_node.inputs[0].values),
-                        requires_grad=False,
-                    )
-                    node_feeds = self.process_inputs([node_feeds])[0]
-                elif isinstance(node_feeds, list):
-                    node_feeds = node_feeds[0]
-                    node_feeds = self.env[node_feeds.name]
+                    node_feeds = self.process_inputs([onnx_node.inputs[0]])[0]
                 else:
-                    node_feeds = self.env[node_feeds.name]
+                    node_feeds = self.env[node_feeds[0].name]
                 inputs = Slice.from_onnx(onnx_node, self.env)
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
@@ -500,7 +496,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -509,7 +505,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.softmax,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {"dim": -1},
                     node_name,
                 )
@@ -518,7 +514,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.sigmoid,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -527,7 +523,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.hardswish,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -536,7 +532,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.leaky_relu,
-                    (self.env[node_feeds.name], onnx_node.attrs["alpha"]),
+                    (self.env[node_feeds[0].name], onnx_node.attrs["alpha"]),
                     {},
                     node_name,
                 )
@@ -545,7 +541,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.interpolate,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {
                         "scale_factor": onnx_node.inputs[2].values.tolist()[2:],
                         "mode": onnx_node.attrs["mode"],
@@ -557,7 +553,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.pow,
-                    (self.env[node_feeds.name], float(onnx_node.inputs[1].values)),
+                    (self.env[node_feeds[0].name], float(onnx_node.inputs[1].values)),
                     {},
                     node_name,
                 )
@@ -566,7 +562,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.sqrt,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -575,7 +571,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.erf,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -587,7 +583,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.squeeze,
-                    (self.env[node_feeds.name], dim),
+                    (self.env[node_feeds[0].name], dim),
                     {},
                     node_name,
                 )
@@ -597,7 +593,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.unsqueeze,
-                    (self.env[node_feeds.name], int(axes)),
+                    (self.env[node_feeds[0].name], int(axes)),
                     {},
                     node_name,
                 )
@@ -606,7 +602,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.neg,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -618,7 +614,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     size_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     size_name,
                 )
@@ -637,7 +633,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_method",
                     "mean",
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {
                         "dim": onnx_node.attrs["axes"],
                         "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
@@ -652,7 +648,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_method",
                     "to",
-                    (self.env[node_feeds.name], torch_dtype),
+                    (self.env[node_feeds[0].name], torch_dtype),
                     {},
                     node_name,
                 )
@@ -661,7 +657,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     torch.sum,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {
                         "dim": onnx_node.attrs["axes"],
                         "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
@@ -674,7 +670,7 @@ class OnnxPytorchParser:
                     node = self.pytorch_graph_module.graph.create_node(
                         "call_function",
                         torch.max,
-                        (self.env[node_feeds.name],),
+                        (self.env[node_feeds[0].name],),
                         {
                             "dim": onnx_node.attrs.get("axes"),
                             "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
@@ -686,7 +682,7 @@ class OnnxPytorchParser:
                     node = self.pytorch_graph_module.graph.create_node(
                         "call_function",
                         torch.max,
-                        (self.env[node_feeds.name],),
+                        (self.env[node_feeds[0].name],),
                         {},
                         node_name,
                     )
@@ -696,7 +692,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     getattr,
-                    (self.env[node_feeds.name], "shape"),
+                    (self.env[node_feeds[0].name], "shape"),
                     {},
                     shape_node_name,
                 )
@@ -824,7 +820,7 @@ class OnnxPytorchParser:
                     node = self.pytorch_graph.create_node(
                         "call_module",
                         target_name,
-                        (self.env[node_feeds.name],),
+                        (self.env[node_feeds[1].name],),
                         {},
                         node_name,
                     )
@@ -850,11 +846,7 @@ class OnnxPytorchParser:
                     self.env[node_name] = node
                 else:
                     axis = onnx_node.attrs.get("axis", 0)
-                    index = torch.nn.Parameter(
-                        torch.from_numpy(onnx_node.inputs[1].values),
-                        requires_grad=False,
-                    )
-                    index = self.process_inputs([index])[0]
+                    index = self.process_inputs([onnx_node.inputs[1]])[0]
                     if axis == 0:
                         index_all = index
                     else:
@@ -864,7 +856,7 @@ class OnnxPytorchParser:
                         "call_function",
                         _operator.getitem,
                         (
-                            self.env[node_feeds.name],
+                            self.env[node_feeds[0].name],
                             index_all,
                         ),
                         {},
@@ -882,7 +874,7 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_module",
                     target_name,
-                    (self.env[node_feeds.name],),
+                    (self.env[node_feeds[0].name],),
                     {},
                     node_name,
                 )
@@ -927,6 +919,11 @@ class OnnxPytorchParser:
         with torch.no_grad():
             self.pytorch_graph_module.eval()
             torch_output = self.pytorch_graph_module(**torch_dict)
+
+        if torch.cuda.is_available():
+            torch_dict = {k: v.cuda() for k, v in torch_dict.items()}
+            self.pytorch_graph_module.cuda()
+            torch_output_gpu = self.pytorch_graph_module(**torch_dict)
 
         if isinstance(torch_output, torch.Tensor):
             torch_output = [torch_output]
