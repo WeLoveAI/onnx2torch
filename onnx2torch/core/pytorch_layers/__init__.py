@@ -1,4 +1,3 @@
-from .arithmetic import Arithmetic
 from .batchnorm import BatchNorm
 from .conv import Conv, ConvTranspose
 from .embedding_layer import Embedding
