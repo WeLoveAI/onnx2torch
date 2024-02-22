@@ -372,39 +372,12 @@ class OnnxPytorchParser:
                     )
                     self.env[node_name] = node
                 else:
-                    cpu_node_name = node_name + "_cpu"
-                    node = self.pytorch_graph.create_node(
-                        "call_method",
-                        "cpu",
-                        (self.env[node_feeds[1].name],),
-                        {},
-                        cpu_node_name,
-                    )
-                    self.env[cpu_node_name] = node
-                    numpy_node_name = node_name + "_numpy"
-                    node = self.pytorch_graph.create_node(
-                        "call_method",
-                        "numpy",
-                        (self.env[cpu_node_name],),
-                        {},
-                        numpy_node_name,
-                    )
-                    self.env[numpy_node_name] = node
-                    to_list_node_name = node_name + "_tolist"
-                    node = self.pytorch_graph.create_node(
-                        "call_method",
-                        "tolist",
-                        (self.env[numpy_node_name],),
-                        {},
-                        to_list_node_name,
-                    )
-                    self.env[to_list_node_name] = node
                     module = Reshape.from_onnx()
                     self.pytorch_graph_module.add_submodule(target_name, module)
                     node = self.pytorch_graph.create_node(
                         "call_module",
                         target_name,
-                        (self.env[node_feeds[0].name], self.env[to_list_node_name]),
+                        (self.env[node_feeds[0].name], self.env[node_feeds[1].name]),
                         {},
                         node_name,
                     )

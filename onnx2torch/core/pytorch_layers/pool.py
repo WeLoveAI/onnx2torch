@@ -5,6 +5,21 @@ from torch.nn.parameter import Parameter
 from .utils import get_value_by_key
 
 
+def is_symmetric_padding(pads):
+    half = len(pads) // 2
+    return pads[:half] == pads[half:]
+
+
+def onnx_to_torch(onnx_intervals):
+    num_intervals = len(onnx_intervals) // 2
+    torch_intervals = []
+    for i in range(num_intervals):
+        begin_index = i
+        end_index = num_intervals + i
+        torch_intervals.extend([onnx_intervals[begin_index], onnx_intervals[end_index]])
+    return torch_intervals
+
+
 class Pool(nn.Module):
     @classmethod
     def from_onnx(cls, onnx_node):
@@ -16,12 +31,25 @@ class Pool(nn.Module):
             elif input_dim == 4:
                 pool = nn.AdaptiveAvgPool2d((1, 1))
         elif onnx_node.op == "MaxPool":
-            pool = nn.MaxPool2d(
-                kernel_size=onnx_node.attrs["kernel_shape"],
-                stride=onnx_node.attrs["strides"],
-                padding=onnx_node.attrs["pads"][2:],
-                ceil_mode=bool(get_value_by_key(onnx_node, "ceil_mode", 0)),
-            )
+            padding = onnx_node.attrs["pads"]
+            if is_symmetric_padding(padding):
+                padding = padding[: len(padding) // 2]
+                pool = nn.MaxPool2d(
+                    kernel_size=onnx_node.attrs["kernel_shape"],
+                    stride=onnx_node.attrs["strides"],
+                    padding=padding,
+                    ceil_mode=bool(get_value_by_key(onnx_node, "ceil_mode", 0)),
+                )
+            else:
+                torch_padding = onnx_to_torch(padding)
+                pad = nn.ConstantPad2d(torch_padding, 0)
+                pool = nn.MaxPool2d(
+                    kernel_size=onnx_node.attrs["kernel_shape"],
+                    stride=onnx_node.attrs["strides"],
+                    padding=0,
+                    ceil_mode=bool(get_value_by_key(onnx_node, "ceil_mode", 0)),
+                )
+                pool = nn.Sequential(pad, pool)
         elif onnx_node.op == "AveragePool":
             pool = nn.AvgPool2d(
                 kernel_size=onnx_node.attrs["kernel_shape"],

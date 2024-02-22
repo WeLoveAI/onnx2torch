@@ -55,7 +55,7 @@ class Reshape(nn.Module):
         super().__init__()
 
     def forward(self, x, shape):
-        return torch.reshape(x, shape)
+        return torch.reshape(x, torch.Size(shape))
 
     @classmethod
     def from_onnx(cls):
