@@ -2,22 +2,9 @@ import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
 
+from .pad_layer import is_symmetric_padding, pad_onnx_to_torch
+
 from .utils import get_value_by_key
-
-
-def is_symmetric_padding(pads):
-    half = len(pads) // 2
-    return pads[:half] == pads[half:]
-
-
-def onnx_to_torch(onnx_intervals):
-    num_intervals = len(onnx_intervals) // 2
-    torch_intervals = []
-    for i in range(num_intervals):
-        begin_index = i
-        end_index = num_intervals + i
-        torch_intervals.extend([onnx_intervals[begin_index], onnx_intervals[end_index]])
-    return torch_intervals
 
 
 class Pool(nn.Module):
@@ -41,7 +28,7 @@ class Pool(nn.Module):
                     ceil_mode=bool(get_value_by_key(onnx_node, "ceil_mode", 0)),
                 )
             else:
-                torch_padding = onnx_to_torch(padding)
+                torch_padding = pad_onnx_to_torch(padding)
                 pad = nn.ConstantPad2d(torch_padding, 0)
                 pool = nn.MaxPool2d(
                     kernel_size=onnx_node.attrs["kernel_shape"],
