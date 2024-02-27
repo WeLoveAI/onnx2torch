@@ -86,3 +86,16 @@ class Ones(BaseModule):
     @classmethod
     def from_onnx(cls):
         return cls()
+
+
+class Tile(nn.Module):
+    # Reshape module is needed, because torch.reshape is not supported in torch.fx
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, sizes):
+        return x.repeat(torch.Size(sizes))
+
+    @classmethod
+    def from_onnx(cls):
+        return cls()

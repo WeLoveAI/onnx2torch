@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from onnx_graphsurgeon import Constant
+
+from onnx2torch.onnx_graphsurgeon import Constant
 
 
 class Slice(nn.Module):
