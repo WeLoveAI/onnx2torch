@@ -957,7 +957,7 @@ class OnnxPytorchParser:
                     node = self.pytorch_graph.create_node(
                         "call_function",
                         _operator.mul,
-                        (self.env[node_feeds[0].name], self.env[ones_node_name]),
+                        (inputs[0], self.env[ones_node_name]),
                         {},
                         node_name,
                     )
