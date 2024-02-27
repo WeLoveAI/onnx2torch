@@ -17,7 +17,7 @@ def convert(
         onnx2torch.check()
 
     if not output_model:
-        return onnx2torch.model
+        return onnx2torch.pytorch_graph_module
     else:
         onnx2torch.save(output_model)
 
