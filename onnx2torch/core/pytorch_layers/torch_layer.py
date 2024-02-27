@@ -99,3 +99,24 @@ class Tile(nn.Module):
     @classmethod
     def from_onnx(cls):
         return cls()
+
+
+class ScatterND(nn.Module):
+    # ScatterND module is needed, because ScatterND is not supported in torch.fx
+    # https://github.com/ENOT-AutoDL/onnx2torch/blob/main/onnx2torch/node_converters/scatter_nd.py
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, indices, updates):
+        output = x.clone()
+
+        ind_dim = indices.dim()
+        output_indices = indices.reshape((-1, indices.shape[-1])).T.tolist()
+        output_updates = updates.reshape((-1, *updates.shape[ind_dim - 1 :]))
+        output[output_indices] = output_updates
+
+        return output
+
+    @classmethod
+    def from_onnx(cls):
+        return cls()

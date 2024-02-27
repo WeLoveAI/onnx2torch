@@ -1012,6 +1012,18 @@ class OnnxPytorchParser:
                         node_name,
                     )
                     self.env[node_name] = node
+            elif onnx_node.op == "ScatterND":
+                module = ScatterND.from_onnx()
+                inputs = self.process_inputs(node_feeds)
+                self.pytorch_graph_module.add_submodule(target_name, module)
+                node = self.pytorch_graph.create_node(
+                    "call_module",
+                    target_name,
+                    inputs,
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
             elif onnx_node.op == "QuantizeLinear":
                 dequant_node = onnx_node.o(0)
                 assert dequant_node.op == "DequantizeLinear"
