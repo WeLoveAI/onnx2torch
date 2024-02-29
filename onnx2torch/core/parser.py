@@ -605,6 +605,24 @@ class OnnxPytorchParser:
                     node_name,
                 )
                 self.env[node_name] = node
+            elif onnx_node.op == "Cos":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.cos,
+                    (self.env[node_feeds[0].name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Sin":
+                node = self.pytorch_graph_module.graph.create_node(
+                    "call_function",
+                    torch.sin,
+                    (self.env[node_feeds[0].name],),
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
             elif onnx_node.op == "Resize":
                 if isinstance(node_feeds[2], gs.Constant):
                     node = self.pytorch_graph_module.graph.create_node(
