@@ -43,6 +43,21 @@ class Conv(nn.Module):
             )
             conv.weight = weight
             conv.bias = bias
+        elif len(weight_shape) == 5:
+            groups = mod.attrs["group"]
+            padding = mod.attrs["pads"][0:3]
+            conv = nn.Conv3d(
+                in_channels=weight.shape[1] * groups,
+                out_channels=weight.shape[0],
+                kernel_size=weight.shape[2:],
+                stride=mod.attrs["strides"],
+                padding=padding,
+                dilation=mod.attrs["dilations"],
+                groups=groups,
+                bias=bias is not None,
+            )
+            conv.weight = weight
+            conv.bias = bias
 
         return conv
 
