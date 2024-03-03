@@ -49,10 +49,8 @@ def onnxruntime_inference(
 ) -> Dict[str, np.array]:
     import onnxruntime as rt
 
-    sess_options = rt.SessionOptions()
-    sess_options.graph_optimization_level = rt.GraphOptimizationLevel.ORT_DISABLE_ALL
     sess = rt.InferenceSession(
-        model.SerializeToString(), sess_options, providers=["CPUExecutionProvider"]
+        model.SerializeToString(), providers=["CPUExecutionProvider"]
     )
     onnx_output = sess.run(None, input_data)
 
