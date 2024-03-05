@@ -43,5 +43,8 @@ class Pool(nn.Module):
                 stride=onnx_node.attrs["strides"],
                 padding=get_value_by_key(onnx_node, "pads", [0, 0, 0, 0])[2:],
                 ceil_mode=bool(get_value_by_key(onnx_node, "ceil_mode", 0)),
+                count_include_pad=bool(
+                    get_value_by_key(onnx_node, "count_include_pad", 0)
+                ),
             )
         return pool

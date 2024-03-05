@@ -30,10 +30,8 @@ class OnnxPytorchParser:
             self.onnx_model = onnx.load(model)
         else:
             self.onnx_model = model
-
-        self.onnx_model = slim(self.onnx_model, no_constant_folding=True)
+        self.onnx_model = slim(self.onnx_model, skip_fusion_patterns=["FusionGelu"])
         self.graph = gs.import_onnx(self.onnx_model)
-        self.graph.fold_constants().cleanup().toposort()
         self.pytorch_graph = Graph()
         self.pytorch_graph_module = GraphModule(torch.nn.Module(), self.pytorch_graph)
         self.env = {}
@@ -106,13 +104,14 @@ class OnnxPytorchParser:
                 feeds.append(input)
             elif isinstance(input, Constant):
                 feeds.append(input)
-            for feed in input.inputs:
-                if (
-                    feed.op == "Split"
-                ):  # for split node, we need to get the output of split node
-                    feeds.append(input)
-                else:
-                    feeds.append(feed)
+            else:
+                for feed in input.inputs:
+                    if (
+                        feed.op == "Split"
+                    ):  # for split node, we need to get the output of split node
+                        feeds.append(input)
+                    else:
+                        feeds.append(feed)
         return feeds
 
     def find_block_id(self, node_name, block_info):
@@ -207,26 +206,50 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Einsum":
+                equation = onnx_node.attrs["equation"]
                 inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.einsum,
-                    inputs,
+                    (equation,) + inputs,
                     {},
                     node_name,
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Clip":
-                module = nn.ReLU6()
-                self.pytorch_graph_module.add_submodule(target_name, module)
-                node = self.pytorch_graph.create_node(
-                    "call_module",
-                    target_name,
-                    (self.env[node_feeds[0].name],),
-                    {},
-                    node_name,
-                )
-                self.env[node_name] = node
+
+                def get_clip_value(feed):
+                    if isinstance(feed, gs.Constant):
+                        value = feed.values.tolist()
+                    elif feed.is_empty():
+                        value = None
+                    else:
+                        value = self.env[feed.name]
+
+                    return value
+
+                min = get_clip_value(node_feeds[1])
+                max = get_clip_value(node_feeds[2])
+                if min == 0 and max == 6:
+                    module = nn.ReLU6()
+                    self.pytorch_graph_module.add_submodule(target_name, module)
+                    node = self.pytorch_graph.create_node(
+                        "call_module",
+                        target_name,
+                        (self.env[node_feeds[0].name],),
+                        {},
+                        node_name,
+                    )
+                    self.env[node_name] = node
+                else:
+                    node = self.pytorch_graph.create_node(
+                        "call_function",
+                        torch.clamp,
+                        (self.env[node_feeds[0].name], min, max),
+                        {},
+                        node_name,
+                    )
+                    self.env[node_name] = node
             elif onnx_node.op == "Add":
                 inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
@@ -351,6 +374,7 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "AveragePool":
+                feed = self.get_node_feeds(onnx_node)
                 module = Pool.from_onnx(onnx_node)
                 self.pytorch_graph_module.add_submodule(target_name, module)
                 node = self.pytorch_graph.create_node(
@@ -362,14 +386,34 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Flatten":
-                node = self.pytorch_graph.create_node(
-                    "call_function",
-                    torch.flatten,
-                    (self.env[node_feeds[0].name],),
-                    {"start_dim": onnx_node.attrs["axis"]},
-                    node_name,
-                )
-                self.env[node_name] = node
+                axis = onnx_node.attrs.get("axis", 1)
+                if axis == 1:
+                    node = self.pytorch_graph.create_node(
+                        "call_function",
+                        torch.flatten,
+                        (self.env[node_feeds[0].name],),
+                        {"start_dim": axis},
+                        node_name,
+                    )
+                    self.env[node_name] = node
+                else:
+                    flatten_end_node_name = node_name + "_end"
+                    node = self.pytorch_graph.create_node(
+                        "call_function",
+                        torch.flatten,
+                        (self.env[node_feeds[0].name],),
+                        {"end_dim": axis - 1},
+                        flatten_end_node_name,
+                    )
+                    self.env[flatten_end_node_name] = node
+                    node = self.pytorch_graph.create_node(
+                        "call_function",
+                        torch.flatten,
+                        (self.env[flatten_end_node_name],),
+                        {"start_dim": 1},
+                        node_name,
+                    )
+                    self.env[node_name] = node
             elif onnx_node.op == "Concat":
                 inputs = self.process_inputs(node_feeds)
                 node = self.pytorch_graph.create_node(
@@ -382,12 +426,21 @@ class OnnxPytorchParser:
                 self.env[node_name] = node
             elif onnx_node.op == "Reshape":
                 if isinstance(onnx_node.inputs[1], gs.Constant):
+                    input_shape = onnx_node.inputs[0].shape
+                    shape_value = onnx_node.inputs[1].values
+                    if np.any(shape_value == 0):
+                        shape = [
+                            input_shape[i] if dim_size == 0 else dim_size
+                            for i, dim_size in enumerate(shape_value)
+                        ]
+                    else:
+                        shape = shape_value.tolist()
                     node = self.pytorch_graph.create_node(
                         "call_method",
                         "reshape",
                         (
                             self.env[node_feeds[0].name],
-                            onnx_node.inputs[1].values.tolist(),
+                            shape,
                         ),
                         {},
                         node_name,
@@ -537,10 +590,16 @@ class OnnxPytorchParser:
 
                     padding = node_feeds[1].values.tolist()
                     torch_padding = pad_onnx_to_torch(padding)
+                    values = node_feeds[2].values.tolist()
                     node = self.pytorch_graph.create_node(
                         "call_function",
                         F.pad,
-                        (self.env[node_feeds[0].name], torch_padding, "constant", 0),
+                        (
+                            self.env[node_feeds[0].name],
+                            torch_padding,
+                            "constant",
+                            values,
+                        ),
                         {},
                         node_name,
                     )
@@ -561,11 +620,12 @@ class OnnxPytorchParser:
                     )
                     self.env[node_name] = node
             elif onnx_node.op == "Softmax":
+                dim = self.get_value_by_key_or_index(onnx_node, "axis", 1, None)
                 node = self.pytorch_graph_module.graph.create_node(
                     "call_function",
                     F.softmax,
                     (self.env[node_feeds[0].name],),
-                    {"dim": -1},
+                    {"dim": dim},
                     node_name,
                 )
                 self.env[node_name] = node
@@ -624,6 +684,23 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "Resize":
+                input_shape = onnx_node.inputs[0].shape
+                mode_mapping = {
+                    ("nearest", 1): "nearest",
+                    ("nearest", 2): "nearest",
+                    ("nearest", 3): "nearest",
+                    ("linear", 1): "linear",
+                    ("linear", 2): "bilinear",
+                    ("linear", 3): "trilinear",
+                    ("cubic", 2): "bicubic",
+                }
+                onnx_mode = onnx_node.attrs["mode"]
+                torch_mode = mode_mapping.get((onnx_mode, len(input_shape) - 2), None)
+                if torch_mode is None:
+                    raise NotImplementedError(
+                        f'{len(input_shape)}D input is not implemented for "{onnx_mode}" mode.'
+                    )
+
                 if isinstance(node_feeds[2], gs.Constant):
                     node = self.pytorch_graph_module.graph.create_node(
                         "call_function",
@@ -631,7 +708,7 @@ class OnnxPytorchParser:
                         (self.env[node_feeds[0].name],),
                         {
                             "scale_factor": node_feeds[2].values.tolist()[2:],
-                            "mode": onnx_node.attrs["mode"],
+                            "mode": torch_mode,
                         },
                         node_name,
                     )
@@ -643,7 +720,7 @@ class OnnxPytorchParser:
                         (self.env[node_feeds[0].name],),
                         {
                             "size": node_feeds[3].values.tolist()[2:],
-                            "mode": onnx_node.attrs["mode"],
+                            "mode": torch_mode,
                         },
                         node_name,
                     )
@@ -655,7 +732,7 @@ class OnnxPytorchParser:
                         (self.env[node_feeds[0].name],),
                         {
                             "size": self.env[node_feeds[3].name],
-                            "mode": onnx_node.attrs["mode"],
+                            "mode": torch_mode,
                         },
                         node_name,
                     )
@@ -667,7 +744,7 @@ class OnnxPytorchParser:
                         (self.env[node_feeds[0].name],),
                         {
                             "scale_factor": self.env[node_feeds[2].name],
-                            "mode": onnx_node.attrs["mode"],
+                            "mode": torch_mode,
                         },
                         node_name,
                     )
@@ -771,6 +848,8 @@ class OnnxPytorchParser:
                     (self.env[node_feeds[0].name],),
                     {
                         "p": 2,
+                        "dim": onnx_node.attrs.get("axes", None),
+                        "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
                     },
                     node_name,
                 )
@@ -788,16 +867,28 @@ class OnnxPytorchParser:
                 )
                 self.env[node_name] = node
             elif onnx_node.op == "ReduceSum":
-                node = self.pytorch_graph_module.graph.create_node(
-                    "call_function",
-                    torch.sum,
-                    (self.env[node_feeds[0].name],),
-                    {
-                        "dim": onnx_node.attrs.get("axes", None),
-                        "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
-                    },
-                    node_name,
-                )
+                if isinstance(node_feeds[1], gs.Constant):
+                    node = self.pytorch_graph_module.graph.create_node(
+                        "call_function",
+                        torch.sum,
+                        (self.env[node_feeds[0].name],),
+                        {
+                            "dim": onnx_node.inputs[1].values.tolist(),
+                            "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
+                        },
+                        node_name,
+                    )
+                else:
+                    node = self.pytorch_graph_module.graph.create_node(
+                        "call_function",
+                        torch.sum,
+                        (self.env[node_feeds[0].name],),
+                        {
+                            "dim": onnx_node.attrs.get("axes", None),
+                            "keepdim": bool(onnx_node.attrs.get("keepdims", 1)),
+                        },
+                        node_name,
+                    )
                 self.env[node_name] = node
             elif onnx_node.op == "ReduceMax":
                 if onnx_node.attrs.get("axes"):
@@ -1095,10 +1186,10 @@ class OnnxPytorchParser:
             self._illegal_char_regex.sub("_", k): torch.from_numpy(v)
             for k, v in input_data_dict.items()
         }
+
         with torch.no_grad():
             self.pytorch_graph_module.eval()
             torch_output = self.pytorch_graph_module(**torch_dict)
-
         # if torch.cuda.is_available():
         #     torch_dict = {k: v.cuda() for k, v in torch_dict.items()}
         #     self.pytorch_graph_module.cuda()
@@ -1106,18 +1197,68 @@ class OnnxPytorchParser:
 
         if isinstance(torch_output, torch.Tensor):
             torch_output = [torch_output]
-
         onnx_output = list(onnx_output_dict.values())
         assert len(torch_output) == len(
             onnx_output
         ), f"({len(torch_output)}, {len(onnx_output)})"
 
         for idx in range(len(onnx_output)):
-            np.testing.assert_allclose(
-                torch_output[idx].detach().cpu().numpy(),
-                onnx_output[idx],
-                rtol=5e-2,
-                atol=1e-3,
-            )
+            try:
+                print(torch_output[idx].detach().cpu().numpy().flatten()[:20])
+                print(onnx_output[idx].flatten()[:20])
+                np.testing.assert_allclose(
+                    torch_output[idx].detach().cpu().numpy(),
+                    onnx_output[idx],
+                    rtol=5e-2,
+                    atol=1e-3,
+                )
+            except:
+                self.graph.outputs.clear()
+                match_dict = {}
+                for node in self.graph.nodes:
+                    self.graph.outputs.append(node.outputs[0])
+                    match_dict.update({node.outputs[0].name: (node.name, node.op)})
+
+                self.graph.cleanup(remove_unused_graph_inputs=True)
+                validate_model = gs.export_onnx(self.graph)
+                # onnx.save(validate_model, "validate_model.onnx")
+                onnx_output_dict = onnxruntime_inference(
+                    validate_model, input_data_dict
+                )
+                from .comparator import FXComparator
+
+                pytorch_recorder = FXComparator(self.pytorch_graph_module)
+                pytorch_recorder(*torch_dict.values())
+                pytorch_output_dict = {
+                    n.name: n.meta["tensor_meta"]["tensor"]
+                    for n in self.pytorch_graph_module.graph.nodes
+                }
+                node_convert_spec = []
+                for name, value in onnx_output_dict.items():
+                    pytorch_name, node_op = match_dict[name]
+                    pytorch_name = self._illegal_char_regex.sub("_", pytorch_name)
+                    if pytorch_name in pytorch_output_dict:
+                        onnx_data = torch.from_numpy(value).flatten()
+
+                        pytorch_data = pytorch_output_dict[pytorch_name].flatten()
+                        cos_sim = F.cosine_similarity(onnx_data, pytorch_data, dim=0)
+                        mre = (
+                            torch.abs(onnx_data - pytorch_data).sum()
+                            * 100
+                            / torch.abs(onnx_data).sum()
+                        )
+                        node_convert_spec.append((name, cos_sim, mre, node_op))
+                    else:
+                        print(f"node {pytorch_name} not found in pytorch")
+                from tabulate import tabulate
+
+                print(
+                    tabulate(
+                        node_convert_spec,
+                        headers=["\nNAME", "\nCOSSIM", "\nMRE", "\nOP_TYPE"],
+                        floatfmt=".4f",
+                    )
+                )
+                raise
 
         print("accuracy test passed")
