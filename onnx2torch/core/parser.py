@@ -1204,8 +1204,6 @@ class OnnxPytorchParser:
 
         for idx in range(len(onnx_output)):
             try:
-                print(torch_output[idx].detach().cpu().numpy().flatten()[:20])
-                print(onnx_output[idx].flatten()[:20])
                 np.testing.assert_allclose(
                     torch_output[idx].detach().cpu().numpy(),
                     onnx_output[idx],
