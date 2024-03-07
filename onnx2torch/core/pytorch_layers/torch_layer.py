@@ -23,15 +23,19 @@ class Tensor(BaseModule):
 
 class Size(BaseModule):
     # Size module is needed, because torch.Size is not supported in torch.fx
-    def __init__(self):
+    def __init__(self, start_dim=None):
         super().__init__()
+        self.start_dim = start_dim
 
     def forward(self, x):
-        return torch.Size(x)
+        if self.start_dim:
+            return torch.Size(x[self.start_dim :])
+        else:
+            return torch.Size(x)
 
     @classmethod
-    def from_onnx(cls):
-        return cls()
+    def from_onnx(cls, start_dim=None):
+        return cls(start_dim)
 
 
 class Full(BaseModule):

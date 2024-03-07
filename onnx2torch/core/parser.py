@@ -726,12 +726,23 @@ class OnnxPytorchParser:
                     )
                     self.env[node_name] = node
                 elif node_feeds[2].is_empty():
+                    size_name = node_name + "_size"
+                    module = Size.from_onnx(start_dim=2)
+                    self.pytorch_graph_module.add_submodule(size_name, module)
+                    node = self.pytorch_graph.create_node(
+                        "call_module",
+                        size_name,
+                        (self.env[node_feeds[3].name],),
+                        {},
+                        size_name,
+                    )
+                    self.env[size_name] = node
                     node = self.pytorch_graph_module.graph.create_node(
                         "call_function",
                         F.interpolate,
                         (self.env[node_feeds[0].name],),
                         {
-                            "size": self.env[node_feeds[3].name],
+                            "size": self.env[size_name],
                             "mode": torch_mode,
                         },
                         node_name,
@@ -1010,6 +1021,26 @@ class OnnxPytorchParser:
                 node = self.pytorch_graph.create_node(
                     "call_function",
                     torch.ceil,
+                    inputs,
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Round":
+                inputs = self.process_inputs(node_feeds)
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.round,
+                    inputs,
+                    {},
+                    node_name,
+                )
+                self.env[node_name] = node
+            elif onnx_node.op == "Floor":
+                inputs = self.process_inputs(node_feeds)
+                node = self.pytorch_graph.create_node(
+                    "call_function",
+                    torch.floor,
                     inputs,
                     {},
                     node_name,
