@@ -85,7 +85,7 @@ class Ones(BaseModule):
         super().__init__()
 
     def forward(self, size):
-        return torch.ones(size, device=self.dummy_buffer.device)
+        return torch.ones(size, device=self.dummy_buffer.device, dtype=torch.int32)
 
     @classmethod
     def from_onnx(cls):
