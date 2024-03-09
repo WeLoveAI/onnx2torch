@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -12,8 +12,10 @@ def onnx_dtype_to_numpy(onnx_dtype: int) -> np.dtype:
     return np.dtype(mapping.TENSOR_TYPE_TO_NP_TYPE[onnx_dtype])
 
 
-def gen_onnxruntime_input_data(model: onnx.ModelProto) -> Dict[str, np.array]:
-    input_info = []
+def gen_onnxruntime_input_data(
+    model: onnx.ModelProto, model_check_inputs: Optional[List[str]] = None
+) -> Dict[str, np.ndarray]:
+    input_info = {}
     for input_tensor in model.graph.input:
         name = input_tensor.name
         shape = []
@@ -26,20 +28,40 @@ def gen_onnxruntime_input_data(model: onnx.ModelProto) -> Dict[str, np.array]:
                 shape.append(None)
         dtype = onnx_dtype_to_numpy(input_tensor.type.tensor_type.elem_type)
 
-        input_info.append([name, shape, dtype])
+        input_info[name] = {"shape": shape, "dtype": dtype}
+
+    if model_check_inputs:
+        for model_check_input in model_check_inputs:
+            key, value = model_check_input.rsplit(":", 1)
+            if value.endswith(".npy"):
+                data = np.load(value)
+                input_info[key] = {"data": data}
+            else:
+                values_list = [int(val) for val in value.split(",")]
+                if key in input_info:
+                    input_info[key]["shape"] = values_list
+                else:
+                    raise Exception(
+                        f"model_check_input name:{key} not found in model, available keys: {' '.join(input_info.keys())}"
+                    )
 
     input_data_dict = {}
-    for name, shapes, dtype in input_info:
-        shapes = [
-            shape if (shape != -1 and not isinstance(shape, str)) else 16
-            for shape in shapes
-        ]
-        shapes = shapes if shapes else [1]
-        if dtype in [np.int32, np.int64]:
-            random_data = np.random.randint(10, size=shapes).astype(dtype)
+    for name, info in input_info.items():
+        if "data" in info:
+            input_data_dict[name] = info["data"]
         else:
-            random_data = np.random.rand(*shapes).astype(dtype)
-        input_data_dict[name] = random_data
+            shapes = [
+                shape if (shape != -1 and not isinstance(shape, str)) else 1
+                for shape in info["shape"]
+            ]
+            shapes = shapes if shapes else [1]
+            dtype = info["dtype"]
+
+            if dtype in [np.int32, np.int64]:
+                random_data = np.random.randint(10, size=shapes).astype(dtype)
+            else:
+                random_data = np.random.rand(*shapes).astype(dtype)
+            input_data_dict[name] = random_data
 
     return input_data_dict
 

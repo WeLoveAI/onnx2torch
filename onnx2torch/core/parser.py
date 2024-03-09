@@ -1210,8 +1210,10 @@ class OnnxPytorchParser:
     def save(self, output_model):
         torch.save(self.pytorch_graph_module, output_model)
 
-    def check(self):
-        input_data_dict = gen_onnxruntime_input_data(self.onnx_model)
+    def check(self, model_check_inputs: str = None):
+        input_data_dict = gen_onnxruntime_input_data(
+            self.onnx_model, model_check_inputs
+        )
         onnx_output_dict = onnxruntime_inference(self.onnx_model, input_data_dict)
         torch_dict = {
             self._illegal_char_regex.sub("_", k): torch.from_numpy(v)
@@ -1240,6 +1242,7 @@ class OnnxPytorchParser:
                     onnx_output[idx],
                     rtol=5e-2,
                     atol=1e-3,
+                    equal_nan=False,
                 )
             except:
                 self.graph.outputs.clear()
@@ -1261,15 +1264,18 @@ class OnnxPytorchParser:
                 pytorch_output_dict = {
                     n.name: n.meta["tensor_meta"]["tensor"]
                     for n in self.pytorch_graph_module.graph.nodes
+                    if "tensor_meta" in n.meta
                 }
                 node_convert_spec = []
                 for name, value in onnx_output_dict.items():
                     pytorch_name, node_op = match_dict[name]
                     pytorch_name = self._illegal_char_regex.sub("_", pytorch_name)
                     if pytorch_name in pytorch_output_dict:
-                        onnx_data = torch.from_numpy(value).flatten()
+                        onnx_data = torch.from_numpy(value).flatten().float()
 
-                        pytorch_data = pytorch_output_dict[pytorch_name].flatten()
+                        pytorch_data = (
+                            pytorch_output_dict[pytorch_name].flatten().float()
+                        )
                         cos_sim = F.cosine_similarity(onnx_data, pytorch_data, dim=0)
                         mre = (
                             torch.abs(onnx_data - pytorch_data).sum()
